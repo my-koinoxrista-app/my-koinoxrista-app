@@ -1,5 +1,5 @@
 import streamlit as st
-from pdf_generator import create_pdf
+from Pdf_Generator import create_pdf
 from rag_assistant import ask_rag, load_models
 
 # Page Configuration
