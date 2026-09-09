@@ -1,15 +1,7 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-streamlit
-fpdf2
-pandas
-scikit-learn
-sentence-transformers
-transformers
-numpy
-python-dotenv
-pypdf
-langchain-community
-langchain-text-splitters
-langchain-huggingface
-faiss-cpu
+streamlit[auth]>=1.45,<2
+pandas>=2.2,<3
+fpdf2>=2.8,<3
+psycopg[binary]>=3.2,<4
+python-dotenv>=1,<2
+openai>=1.90,<3
+certifi>=2024.2.2

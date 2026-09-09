@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: koinoxrista-postgres
+    restart: unless-stopped
+
+    env_file:
+      - .env.compose
+
+    environment:
+      POSTGRES_DB: koinoxrista
+      POSTGRES_USER: koinoxrista
+
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    volumes:
+      - koinoxrista_pgdata:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U koinoxrista -d koinoxrista"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  koinoxrista_pgdata:

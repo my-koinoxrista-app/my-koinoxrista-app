@@ -1,0 +1,12 @@
+[theme]
+base = "light"
+primaryColor = "#c62828"
+backgroundColor = "#f5f8f5"
+secondaryBackgroundColor = "#eaf1ec"
+textColor = "#111111"
+font = "sans serif"
+
+[server]
+port = 8501
+fileWatcherType = "poll"
+runOnSave = true
