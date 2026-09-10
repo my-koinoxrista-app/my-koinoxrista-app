@@ -110,7 +110,7 @@ END $preflight$;
 
 -- The application role receives no ownership, schema creation, role management,
 -- TRUNCATE, or administrative grants. It must never inherit the owner role.
-ALTER ROLE koinoxrista_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+ALTER ROLE koinoxrista_app NOCREATEDB NOCREATEROLE NOINHERIT;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO koinoxrista_app;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM koinoxrista_app;

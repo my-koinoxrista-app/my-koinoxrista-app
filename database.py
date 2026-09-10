@@ -55,11 +55,18 @@ def _connect():
     user = os.getenv('POSTGRES_APP_USER', 'koinoxrista_app')
     if not password or user != 'koinoxrista_app':
         raise AccessError('Δεν έχουν ρυθμιστεί τα περιορισμένα database credentials.')
+    dsn = os.getenv('POSTGRES_APP_DSN', '').strip()
+    if dsn:
+        return psycopg.connect(
+            dsn, user=user, password=password,
+            options='-c search_path=public -c row_security=on',
+        )
     return psycopg.connect(
         host=os.getenv('POSTGRES_HOST', '127.0.0.1'),
         port=int(os.getenv('POSTGRES_PORT', '5433')),
         dbname=os.getenv('POSTGRES_DB', 'koinoxrista'),
         user=user, password=password,
+        sslmode=os.getenv('POSTGRES_SSLMODE', 'prefer'),
         options='-c search_path=public -c row_security=on',
     )
 

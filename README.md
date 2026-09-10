@@ -53,3 +53,38 @@ export KOINOXRISTA_PAYMENT_PUBLIC_BASE_URL='https://payments.example.com'
 ```
 
 Η εταιρεία αποθηκεύει το δικό της Stripe Connect account id από το Ιστορικό → Πληρωμές. Μετά την έκδοση δημιουργείται ένα payment request ανά ιδιοκτησία, το email περιλαμβάνει το ατομικό PDF και κουμπί `Πληρωμή online`, και το status αλλάζει μόνο από verified Stripe webhook. Το webhook endpoint είναι `POST /webhooks/stripe` στον `payment_webhook_server.py`.
+
+Για hosted PostgreSQL μπορείς να χρησιμοποιήσεις Neon με τα Streamlit secrets:
+
+```toml
+POSTGRES_APP_DSN = "postgresql://koinoxrista_app:...@ep-...neon.tech/koinoxrista?sslmode=require"
+POSTGRES_APP_USER = "koinoxrista_app"
+POSTGRES_APP_PASSWORD = "..."
+KOINOXRISTA_SCOPE_KEY = "..."
+```
+
+Η migration εφαρμόζεται μία φορά με administrator connection. Στο Streamlit Cloud δεν βάζουμε administrator credentials ούτε `.env` στο repository.
+
+Για καινούργια άδεια Neon βάση, από το project directory:
+
+```bash
+read -r -s "NEON_ADMIN_DSN?Paste Neon admin DSN (hidden): "; export NEON_ADMIN_DSN
+.venv/bin/python scripts/bootstrap_neon.py
+unset NEON_ADMIN_DSN
+```
+
+Το script σταματά αν βρει ήδη application tables. Κράτησε τα τέσσερα runtime values που εκτυπώνει για τα Streamlit Cloud Secrets.
+
+Για μεταφορά των τοπικών δεδομένων, αφού ολοκληρωθεί επιτυχώς το bootstrap:
+
+```bash
+read -r -s "LOCAL_ADMIN_DSN?Paste local admin DSN (hidden): "; export LOCAL_ADMIN_DSN
+pg_dump --dbname="$LOCAL_ADMIN_DSN" --format=custom --data-only --no-owner --no-privileges \
+    --file=/tmp/koinoxrista-data.dump
+unset LOCAL_ADMIN_DSN
+read -r -s "NEON_ADMIN_DSN?Paste Neon admin DSN (hidden): "; export NEON_ADMIN_DSN
+pg_restore --dbname="$NEON_ADMIN_DSN" --no-owner --no-privileges \
+    --exit-on-error /tmp/koinoxrista-data.dump
+unset NEON_ADMIN_DSN
+rm /tmp/koinoxrista-data.dump
+```
