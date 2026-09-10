@@ -321,15 +321,24 @@ def render(config, building_id):
         apartment_ids = [a['id'] for a in config['apartments']]
         names = config.get('property_names', {})
         labels = {a['id']: a['code'] for a in config['apartments']}
+        from statement_delivery import list_contacts, save_contacts
+        contacts = list_contacts(building_id)
+        contacts_by_id = {contact['id']: contact for contact in contacts}
 
         # Only existing properties appear in the editor. Internal IDs are
         # restored by row position and never sent to the visible DataFrame.
-        property_columns = ['code', 'name', 'property_type', 'floor', 'area_sqm']
+        property_columns = [
+            'code', 'name', 'tenant_name', 'email', 'email_enabled',
+            'property_type', 'floor', 'area_sqm',
+        ]
         visible_properties = [a for a in config['apartments'] if not a.get('archived', False)]
         existing_ids = [a['id'] for a in visible_properties]
         rows = [{
             'code': a['code'],
             'name': names.get(a['id'], ''),
+            'tenant_name': contacts_by_id.get(a['id'], {}).get('tenant_name', ''),
+            'email': contacts_by_id.get(a['id'], {}).get('email', ''),
+            'email_enabled': contacts_by_id.get(a['id'], {}).get('enabled', False),
             'property_type': PROPERTY_LABELS.get(
                 a.get('property_type', 'APARTMENT'), 'Διαμέρισμα'),
             'floor': '' if a.get('floor') is None else str(a['floor']),
@@ -350,6 +359,10 @@ def render(config, building_id):
                     'name': st.column_config.TextColumn(
                         'Όνομα / περιγραφή',
                         help='Προαιρετικό. Δεν αποτελεί στοιχείο κυριότητας.'),
+                    'email': st.column_config.TextColumn(
+                        'Email ενοίκου', max_chars=254),
+                    'email_enabled': st.column_config.CheckboxColumn(
+                        'Ενεργή αποστολή'),
                     'property_type': st.column_config.SelectboxColumn(
                         'Τύπος', options=list(PROPERTY_LABELS.values()), required=True),
                     'floor': st.column_config.TextColumn(
@@ -367,7 +380,18 @@ def render(config, building_id):
                         row['id'] = existing_ids[index]
                     records.extend(dict(a, name=names.get(a['id'], ''))
                                    for a in config['apartments'] if a.get('archived', False))
-                    return save_properties(config, records)
+                    candidate = save_properties(config, records)
+                    updated_contacts = []
+                    for contact in contacts:
+                        updated = dict(contact)
+                        row = next((item for item in records if item['id'] == contact['id']), None)
+                        if row is not None and 'email' in row:
+                            updated['tenant_name'] = row.get('tenant_name', '')
+                            updated['email'] = row.get('email', '')
+                            updated['enabled'] = bool(row.get('email_enabled', False))
+                        updated_contacts.append(updated)
+                    save_contacts(building_id, updated_contacts)
+                    return candidate
                 commit(config, save_visible_properties)
 
         with st.expander('＋ Προσθήκη ιδιοκτησίας'):
@@ -508,16 +532,21 @@ def render(config, building_id):
             rule = current['rule'] if current else {}
             scope = 'category_' + chosen
             with st.form('category_form'):
-                if current:
-                    cid = current['id']
-                    st.caption(f'Μόνιμο ID: {cid}')
-                    name = text('Όνομα κατηγορίας', current['name'])
-                else:
-                    template = choose('Προτεινόμενη ονομασία (προαιρετικό)', [''] + list(CATEGORY_TEMPLATES), labels={'': 'Προσαρμοσμένη', **CATEGORY_TEMPLATES})
-                    scope = 'category_new_' + template
-                    cid = text('ID κατηγορίας', template)
-                    name = text('Όνομα κατηγορίας', CATEGORY_TEMPLATES.get(template, ''))
-                payer = choose('Υπόχρεος', list(PAYER_LABELS), current.get('payer', 'TENANT') if current else 'TENANT', PAYER_LABELS)
+                identity_left, identity_right = st.columns(2)
+                with identity_left:
+                    if current:
+                        cid = current['id']
+                        st.caption(f'Μόνιμο ID: {cid}')
+                        name = text('Όνομα κατηγορίας', current['name'])
+                    else:
+                        template = choose('Προτεινόμενη ονομασία', [''] + list(CATEGORY_TEMPLATES), labels={'': 'Προσαρμοσμένη', **CATEGORY_TEMPLATES})
+                        scope = 'category_new_' + template
+                        name = text('Όνομα κατηγορίας', CATEGORY_TEMPLATES.get(template, ''))
+                with identity_right:
+                    if not current:
+                        cid = text('ID κατηγορίας', template)
+                    payer = choose('Υπόχρεος', list(PAYER_LABELS), current.get('payer', 'TENANT') if current else 'TENANT', PAYER_LABELS)
+
                 rtype = choose('Κανόνας κατανομής', list(RULE_LABELS), rule.get('type', 'WEIGHTED'), RULE_LABELS)
                 table_id, participants = None, []
                 if rtype == 'WEIGHTED':

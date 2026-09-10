@@ -6,6 +6,7 @@ from psycopg import Error as DatabaseError
 from statement_store import (list_statements,get_statement,ensure_property_pdfs,
                              list_property_pdfs,get_property_pdf,StatementError)
 import statement_delivery_ui
+import payment_ui
 
 
 def render(building_id):
@@ -33,7 +34,7 @@ def render(building_id):
         st.download_button('Λήψη συνολικού PDF',statement['pdf'],
             file_name=f"koinoxrista_{statement['period_key']}_v{statement['revision']}.pdf",
             mime='application/pdf',key=f"history_pdf_{statement['id']}")
-        tab_files,tab_email=st.tabs(['Ατομικά PDF','Αποστολή email'])
+        tab_files,tab_email,tab_payments=st.tabs(['Ατομικά PDF','Αποστολή email','Πληρωμές'])
         with tab_files:
             documents=ensure_property_pdfs(building_id,statement['id'])
             st.dataframe(pd.DataFrame([{'Ιδιοκτησία':d['property']['code'],
@@ -54,5 +55,7 @@ def render(building_id):
                         mime='application/pdf',key=f"history_property_{statement['id']}_{d['apartment_id']}")
         with tab_email:
             statement_delivery_ui.render(building_id,statement)
+        with tab_payments:
+            payment_ui.render(building_id,statement)
     except (StatementError,DatabaseError,ValueError) as exc:
         st.error(str(exc))

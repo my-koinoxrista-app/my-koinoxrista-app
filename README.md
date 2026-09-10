@@ -41,3 +41,15 @@ python3 -m unittest discover -s tests -v
 ```
 
 Εκτελέστηκαν 33 δοκιμές σε απομονωμένο περιβάλλον Python 3.13: 23 προηγούμενες και 10 νέες. Όλες πέρασαν. Δεν έχει εκτελεστεί σύνδεση στη δική σου PostgreSQL ή το τοπικό Streamlit.
+
+## Hosted πληρωμές
+
+Μετά τη migration `011_payments.sql`, ρύθμισε στο deployment:
+
+```bash
+export KOINOXRISTA_STRIPE_SECRET_KEY='...'
+export KOINOXRISTA_STRIPE_WEBHOOK_SECRET='...'
+export KOINOXRISTA_PAYMENT_PUBLIC_BASE_URL='https://payments.example.com'
+```
+
+Η εταιρεία αποθηκεύει το δικό της Stripe Connect account id από το Ιστορικό → Πληρωμές. Μετά την έκδοση δημιουργείται ένα payment request ανά ιδιοκτησία, το email περιλαμβάνει το ατομικό PDF και κουμπί `Πληρωμή online`, και το status αλλάζει μόνο από verified Stripe webhook. Το webhook endpoint είναι `POST /webhooks/stripe` στον `payment_webhook_server.py`.

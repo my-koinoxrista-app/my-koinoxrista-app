@@ -5,6 +5,7 @@ automatic duplicate submissions. ACCEPTED means accepted by the SMTP server,
 not delivered to an inbox, read, or paid.
 """
 import hashlib
+from html import escape
 import os
 import re
 import smtplib
@@ -240,8 +241,10 @@ def _subject(statement):
     return _text(f"Κοινόχρηστα {statement['building_name']} - {statement['period_key']}",250)
 
 
-def _body(statement,property_data,recipient_name):
+def _body(statement,property_data,recipient_name,payment_url=''):
     salutation=f'Αγαπητέ/ή {recipient_name},' if recipient_name else 'Καλησπέρα σας,'
+    payment = (f"\nΠληρωμή online:\n{payment_url}\n"
+               if payment_url else "\nΟ online σύνδεσμος πληρωμής δεν είναι διαθέσιμος. Επικοινωνήστε με την εταιρεία διαχείρισης.\n")
     return (f"{salutation}\n\nΣας αποστέλλουμε την εκκαθάριση κοινοχρήστων για την "
             f"ιδιοκτησία {property_data['code']} της πολυκατοικίας {statement['building_name']}, "
             f"περιόδου {statement['period_key']}.\n\n"
@@ -249,7 +252,8 @@ def _body(statement,property_data,recipient_name):
             f"Αναλυτικά: ενοίκου {property_data['totals']['TENANT']} €, "
             f"ιδιοκτήτη {property_data['totals']['OWNER']} €, "
             f"λοιπές {property_data['totals']['OTHER']} €.\n\n"
-            "Το συνημμένο περιλαμβάνει μόνο τη δική σας ιδιοκτησία. "
+            "Το συνημμένο περιλαμβάνει μόνο τη δική σας ιδιοκτησία."
+            f"{payment}"
             "Το μήνυμα δεν αποτελεί επιβεβαίωση εξόφλησης. "
             "Για διευκρινίσεις απευθυνθείτε στην εταιρεία διαχείρισης.\n")
 
@@ -261,6 +265,8 @@ def preview(building_id,statement_id):
     documents=ensure_property_pdfs(building_id,statement_id)
     contacts={c['id']:c for c in list_contacts(building_id)}
     statuses=list_status(building_id,statement_id)
+    from payment_service import list_payment_requests
+    payments={p['apartment_id']:p for p in list_payment_requests(building_id,statement_id)}
     with get_connection() as conn,conn.cursor() as cur:
         cur.execute('''SELECT s.period_key,s.revision,s.issued_at,s.report_data
             FROM issued_statements s JOIN buildings b ON b.id=s.building_id
@@ -283,6 +289,8 @@ def preview(building_id,statement_id):
             'tenant_name':contact['tenant_name'],'email':contact['email'],
             'enabled':contact['enabled'],'name_matches':name_matches,
             'archived_tenant_name':archived_name,'delivery':previous})
+        entries[-1]['payment_url']=payments.get(aid,{}).get('checkout_url','')
+        entries[-1]['payment_status']=payments.get(aid,{}).get('status','UNPAID')
     return {'statement':statement,'entries':entries}
 
 
@@ -290,7 +298,7 @@ def _approval_fingerprint(preview_data,selected,settings,smtp):
     """Bind final approval to exact issue, recipient, PDF and sender information."""
     import json
     payload={'statement':preview_data['statement']['id'],'company':current_tenant(),
-             'selected':sorted([(e['apartment_id'],e['email'],e['tenant_name'],e['sha256'],e['pdf_id'],e['property'])
+             'selected':sorted([(e['apartment_id'],e['email'],e['tenant_name'],e['sha256'],e['pdf_id'],e['property'],e.get('payment_url',''))
                          for e in preview_data['entries'] if e['apartment_id'] in selected],key=lambda x:x[0]),
              'sender':smtp['sender'],'sender_name':smtp['sender_name'],
              'smtp_host':smtp['host'],'smtp_port':smtp['port'],'smtp_security':smtp['security'],
@@ -330,6 +338,8 @@ def prepare(building_id,statement_id,selected,expected_fingerprint):
               ON c.building_id=p.building_id AND c.apartment_id=p.apartment_id
             WHERE p.company_id=%s AND p.building_id=%s AND p.statement_id=%s''',
             (company,building_id,statement_id))
+        from payment_service import list_payment_requests
+        payments={p['apartment_id']:p for p in list_payment_requests(building_id,statement_id)}
         entries=[]
         for pid,aid,property_data,digest,name,email,enabled in cur.fetchall():
             entries.append({'apartment_id':aid,'code':property_data['code'],'property':property_data,
@@ -337,7 +347,8 @@ def prepare(building_id,statement_id,selected,expected_fingerprint):
                             'enabled':enabled,'delivery':None,
                             'archived_tenant_name':property_data.get('tenant_name',''),
                             'name_matches':not property_data.get('tenant_name') or
-                                property_data['tenant_name'].casefold()==name.casefold()})
+                                property_data['tenant_name'].casefold()==name.casefold(),
+                            'payment_url':payments.get(aid,{}).get('checkout_url','')})
         if selected-{e['apartment_id'] for e in entries}:
             raise DeliveryError('Άγνωστη ιδιοκτησία στην επιλογή.')
         cur.execute('SELECT display_name,reply_to FROM company_mail_settings WHERE company_id=%s FOR SHARE',(company,))
@@ -368,16 +379,18 @@ def prepare(building_id,statement_id,selected,expected_fingerprint):
                 raise DeliveryError('Ο σημερινός ένοικος διαφέρει από το όνομα της εκδοθείσας εκκαθάρισης. Ελέγξτε την περίοδο και τον παραλήπτη.')
             email=_email(entry['email'],True)
             subject=_subject(statement)
-            body=_body(statement,entry['property'],entry['tenant_name'])
+            if not entry['payment_url']:
+                raise DeliveryError('Δεν υπάρχει διαθέσιμο payment link για την ιδιοκτησία.')
+            body=_body(statement,entry['property'],entry['tenant_name'],entry['payment_url'])
             delivery_id=str(uuid4())
             cur.execute('''INSERT INTO statement_email_deliveries
                 (id,company_id,building_id,statement_id,apartment_id,property_pdf_id,pdf_sha256,
-                 recipient_name,recipient_email,sender_name,sender_email,reply_to,email_subject,email_body)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                 recipient_name,recipient_email,sender_name,sender_email,reply_to,email_subject,email_body,payment_url)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
                 (delivery_id,company,building_id,statement_id,entry['apartment_id'],entry['pdf_id'],
                  entry['sha256'],_text(entry['tenant_name']),email,
                  _text(settings['display_name'] or smtp['sender_name']),smtp['sender'],
-                 settings['reply_to'],subject,body))
+                 settings['reply_to'],subject,body,entry['payment_url']))
             prepared.append(delivery_id)
     return prepared
 
@@ -387,7 +400,7 @@ def _load_delivery(building_id,delivery_id):
     with get_connection() as conn,conn.cursor() as cur:
         cur.execute('''SELECT d.id,d.statement_id,d.apartment_id,d.recipient_name,d.recipient_email,
             d.sender_name,d.sender_email,d.reply_to,d.email_subject,d.email_body,d.status,
-            d.pdf_sha256,p.pdf_data,p.pdf_sha256,s.period_key,s.revision
+            d.payment_url,d.pdf_sha256,p.pdf_data,p.pdf_sha256,s.period_key,s.revision
             FROM statement_email_deliveries d
             JOIN issued_property_pdfs p ON p.id=d.property_pdf_id AND p.statement_id=d.statement_id
             JOIN issued_statements s ON s.id=d.statement_id AND s.building_id=d.building_id
@@ -395,8 +408,9 @@ def _load_delivery(building_id,delivery_id):
         row=cur.fetchone()
     if row is None:
         raise DeliveryError('Η αποστολή δεν βρέθηκε.')
-    keys=('id','statement_id','apartment_id','recipient_name','recipient_email','sender_name',
-          'sender_email','reply_to','subject','body','status','sha256','pdf','stored_sha256','period_key','revision')
+        keys=('id','statement_id','apartment_id','recipient_name','recipient_email','sender_name',
+            'sender_email','reply_to','subject','body','status','payment_url','sha256','pdf',
+            'stored_sha256','period_key','revision')
     d=dict(zip(keys,row))
     d['pdf']=bytes(d['pdf'])
     if (d['sha256']!=d['stored_sha256'] or hashlib.sha256(d['pdf']).hexdigest()!=d['sha256']
@@ -414,6 +428,13 @@ def _message(d):
     message['Subject']=d['subject']
     message['Message-ID']=f"<{d['id']}@{d['sender_email'].rsplit('@',1)[1]}>"
     message.set_content(d['body'])
+    if d['payment_url']:
+        message.add_alternative(
+            '<html><body><p>' + escape(d['body']).replace('\n', '<br>') +
+            f'</p><p><a href="{escape(d["payment_url"], quote=True)}" '
+            'style="display:inline-block;padding:12px 18px;background:#1769aa;color:#fff;'
+            'text-decoration:none;border-radius:4px;font-weight:bold">Πληρωμή online</a></p></body></html>',
+            subtype='html')
     message.add_attachment(d['pdf'],maintype='application',subtype='pdf',
                            filename=f"koinoxrista_{d['period_key']}_v{d['revision']}.pdf")
     return message

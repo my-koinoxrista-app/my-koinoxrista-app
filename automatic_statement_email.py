@@ -33,6 +33,8 @@ def eligible_recipients(preview_data):
             reason = "Υπάρχει ήδη καταγραφή αποστολής."
         elif not entry["enabled"] or not entry["email"] or not entry["tenant_name"]:
             reason = "Δεν υπάρχουν πλήρη, ενεργά στοιχεία επικοινωνίας."
+        elif not entry.get("payment_url"):
+            reason = "Δεν υπάρχει διαθέσιμο payment link."
         elif not entry["name_matches"]:
             reason = "Το όνομα διαφέρει από το εκδοθέν PDF."
         else:

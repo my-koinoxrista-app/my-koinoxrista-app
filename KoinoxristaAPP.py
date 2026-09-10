@@ -23,9 +23,9 @@ import receipt_import as receipts
 import receipt_management_ui
 import building_management
 import statement_history_ui
-import statement_delivery_ui
 from statement_store import issue_statement, StatementError
 from automatic_statement_email import auto_email_enabled, send_after_issue
+from payment_service import ensure_payment_requests, PaymentError
 from ui_theme import brand, hero, page_header, section_title, empty_state
 
 
@@ -319,8 +319,6 @@ def render():
 
     with config_tab:
         configuration_forms.render(config, building_id)
-        with st.expander('Ένοικοι & email', expanded=False):
-            statement_delivery_ui.render_contacts(building_id)
         st.divider()
         if st.button('Αποθήκευση πολυκατοικίας στη βάση', type='primary'):
             try:
@@ -921,6 +919,11 @@ def render():
                     issued = issue_statement(
                         building_id, key, source['configuration'], source['period_data'],
                         owner_names=owner_names)
+                    payment_setup = ensure_payment_requests(building_id, issued['id'])
+                    if not payment_setup['ready']:
+                        st.warning(payment_setup['error'])
+                    elif payment_setup.get('error'):
+                        st.warning(payment_setup['error'])
                     if issued['reused']:
                         st.info(f"Η ίδια εκκαθάριση υπάρχει ήδη ως έκδοση {issued['revision']}.")
                     else:
@@ -943,7 +946,7 @@ def render():
                         if not outcome['results'] and not outcome['skipped'] and not outcome['error']:
                             st.info('Δεν υπάρχουν νέοι ενεργοί παραλήπτες για αυτή την έκδοση.')
                         st.caption('Η αποδοχή από SMTP δεν εγγυάται παράδοση στα Εισερχόμενα. Η εκκαθάριση παραμένει αποθηκευμένη ανεξάρτητα από το αποτέλεσμα email.')
-                except (StatementError, ValueError, KeyError, TypeError, DatabaseError) as exc:
+                except (StatementError, PaymentError, ValueError, KeyError, TypeError, DatabaseError) as exc:
                     st.error(str(exc))
 
             with st.expander('Προχωρημένα · Αναλυτικά δεδομένα'):
