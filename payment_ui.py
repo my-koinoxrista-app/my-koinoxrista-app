@@ -1,4 +1,5 @@
 """Streamlit payment settings and per-statement payment dashboard."""
+import os
 import pandas as pd
 import streamlit as st
 from psycopg import Error as DatabaseError
@@ -16,6 +17,10 @@ STATUS_LABELS = {
 
 def render(building_id, statement):
     st.subheader('Πληρωμές')
+    st.caption(
+        f"Stripe secret loaded: {bool(os.getenv('KOINOXRISTA_STRIPE_SECRET_KEY'))} | "
+        f"Payment base URL: {os.getenv('KOINOXRISTA_PAYMENT_PUBLIC_BASE_URL', 'MISSING')}"
+    )   
     settings = provider_settings()
     with st.expander('Payment provider account', expanded=settings is None):
         st.caption('Κάθε εταιρεία χρησιμοποιεί το δικό της provider account. Το secret παραμένει στις ρυθμίσεις του server.')
