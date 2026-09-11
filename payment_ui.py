@@ -10,6 +10,7 @@ from payment_service import (PaymentError, ensure_payment_requests,
 STATUS_LABELS = {
     'UNPAID': 'Απλήρωτο', 'PAID': 'Πληρωμένο',
     'FAILED': 'Απέτυχε', 'REFUNDED': 'Επιστροφή',
+    'PARTIALLY_REFUNDED': 'Μερική επιστροφή',
 }
 
 

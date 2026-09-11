@@ -24,3 +24,5 @@ docs/
 .env.tenancy
 
 .streamlit/.config.toml
+.streamlit/cloud-secrets.toml
+.env.render

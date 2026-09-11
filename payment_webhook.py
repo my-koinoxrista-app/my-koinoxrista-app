@@ -6,7 +6,8 @@ import os
 import time
 from uuid import UUID
 
-from database import get_connection
+import psycopg
+from psycopg.types.json import Jsonb
 
 
 class WebhookError(ValueError):
@@ -41,17 +42,37 @@ def handle_stripe_webhook(raw_body, signature):
     _signature(raw_body, signature)
     try:
         event = json.loads(raw_body.decode('utf-8'))
-        event_id = str(event['id'])
-        event_type = str(event['type'])
-        account_id = str(event.get('account') or '')
+        if not isinstance(event, dict):
+            raise ValueError()
+        kind = event.get('type')
+        if kind not in ('checkout.session.completed', 'checkout.session.async_payment_succeeded',
+                        'checkout.session.async_payment_failed', 'charge.refunded'):
+            return 'IGNORED'
         obj = event['data']['object']
-        metadata = obj.get('metadata') or {}
-        token = UUID(str(metadata.get('payment_token') or obj.get('client_reference_id')))
-    except (KeyError, TypeError, ValueError, UnicodeDecodeError):
-        raise WebhookError('Το webhook δεν περιέχει payment token.') from None
-    provider_payment_id = str(obj.get('payment_intent') or obj.get('id') or '')
-    failure = str((obj.get('last_payment_error') or {}).get('message') or '')
-    with get_connection() as conn, conn.cursor() as cur:
-        cur.execute('SELECT public.koinoxrista_payment_webhook(%s,%s,%s,%s,%s,%s,%s)',
-                ('stripe', event_id, str(token), event_type, provider_payment_id, account_id, failure))
-        return cur.fetchone()[0]
+        if not isinstance(obj, dict) or not isinstance(event.get('livemode'), bool):
+            raise ValueError()
+        expected_live = os.environ.get('KOINOXRISTA_PAYMENT_MODE', 'test')
+        if expected_live not in ('test', 'live') or event['livemode'] != (expected_live == 'live'):
+            raise ValueError()
+        if not str(event.get('account', '')).startswith('acct_'):
+            raise ValueError()
+        if kind != 'charge.refunded':
+            metadata = obj.get('metadata') or {}
+            if not metadata.get('payment_token'):
+                return 'IGNORED'
+            UUID(str(metadata['payment_token']))
+    except (KeyError, TypeError, ValueError, AttributeError, UnicodeDecodeError):
+        raise WebhookError('Μη έγκυρο συμβάν πληρωμής.') from None
+    dsn = os.environ.get('KOINOXRISTA_WEBHOOK_DSN', '').strip()
+    if not dsn:
+        raise RuntimeError('Webhook database connection is not configured.')
+    with psycopg.connect(dsn, connect_timeout=10) as conn, conn.cursor() as cur:
+        cur.execute('SELECT current_user')
+        if cur.fetchone()[0] != 'koinoxrista_webhook':
+            raise RuntimeError('Webhook requires its dedicated database role.')
+        cur.execute('SELECT public.koinoxrista_confirm_stripe_event(%s)', (Jsonb(event),))
+        result = cur.fetchone()[0]
+        if result == 'UNMATCHED' and kind == 'charge.refunded':
+            # A refund may arrive before the payment confirmation; let Stripe retry.
+            raise RuntimeError('Payment confirmation has not arrived yet.')
+        return result

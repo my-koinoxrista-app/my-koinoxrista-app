@@ -1,0 +1,10 @@
+FROM python:3.13-slim
+WORKDIR /app
+RUN pip install --no-cache-dir 'psycopg[binary]>=3.2,<4'
+COPY payment_webhook.py payment_webhook_server.py ./
+RUN useradd --uid 10001 --create-home payments
+USER payments
+ENV KOINOXRISTA_WEBHOOK_HOST=0.0.0.0
+ENV PORT=8787
+EXPOSE 8787
+CMD ["python", "payment_webhook_server.py"]

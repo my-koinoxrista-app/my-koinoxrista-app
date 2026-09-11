@@ -1,0 +1,15 @@
+# Sandbox service. No deployment or paid resource is created by this file.
+services:
+  - type: web
+    name: koinoxrista-payments-test
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.payments
+    healthCheckPath: /healthz
+    envVars:
+      - key: KOINOXRISTA_PAYMENT_MODE
+        value: test
+      - key: KOINOXRISTA_WEBHOOK_DSN
+        sync: false
+      - key: KOINOXRISTA_STRIPE_WEBHOOK_SECRET
+        sync: false

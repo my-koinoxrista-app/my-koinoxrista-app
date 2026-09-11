@@ -4,6 +4,9 @@ The application stores an immutable payment request per issued property. Stripe
 Checkout is the first adapter; the domain status is changed only by the signed
 webhook path in payment_webhook.py.
 """
+import hashlib
+import ssl
+import certifi
 import json
 import os
 import urllib.parse
@@ -62,9 +65,10 @@ def _stripe_request(account_id, form):
     request = urllib.request.Request(
         'https://api.stripe.com/v1/checkout/sessions', data=encoded, method='POST',
         headers={'Authorization': f'Bearer {secret}', 'Stripe-Account': account_id,
-                 'Content-Type': 'application/x-www-form-urlencoded'})
+                 'Content-Type': 'application/x-www-form-urlencoded',
+                 'Idempotency-Key': hashlib.sha256((account_id + ':' + encoded.decode()).encode()).hexdigest()})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=30, context=ssl.create_default_context(cafile=certifi.where())) as response:
             payload = json.loads(response.read().decode())
     except Exception as exc:
         raise PaymentError('Ο payment provider δεν δημιούργησε checkout link.') from exc
@@ -99,7 +103,10 @@ def ensure_payment_requests(building_id, statement_id):
     settings = provider_settings()
     if settings is None:
         return {'ready': False, 'created': 0, 'error': 'Δεν έχει οριστεί payment provider account για την εταιρεία.'}
-    _, base_url = _config()
+    secret, base_url = _config()
+    live = secret.startswith('sk_live_')
+    if not secret.startswith(('sk_test_', 'sk_live_')):
+        raise PaymentError('Μη έγκυρο Stripe secret key.')
     documents = ensure_property_pdfs(building_id, statement_id)
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute('''SELECT s.period_key,s.revision FROM issued_statements s
@@ -119,14 +126,16 @@ def ensure_payment_requests(building_id, statement_id):
                 continue
             cur.execute('''INSERT INTO payment_requests
                 (id,company_id,building_id,statement_id,statement_revision,apartment_id,property_pdf_id,
-                 amount_cents,period_key,payment_token,provider,provider_account_id)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 amount_cents,period_key,payment_token,provider,provider_account_id,livemode)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(statement_id,apartment_id) DO UPDATE SET
-                    provider_account_id=EXCLUDED.provider_account_id,updated_at=now()
-                RETURNING id,payment_token,provider_session_id,checkout_url,status''',
+                    updated_at=payment_requests.updated_at
+                RETURNING id,payment_token,provider_session_id,checkout_url,status,provider_account_id,livemode''',
                 (str(uuid4()), company, building_id, statement_id, revision, document['apartment_id'],
-                 document['id'], cents, period_key, str(uuid4()), settings['provider'], settings['account_id']))
+                 document['id'], cents, period_key, str(uuid4()), settings['provider'], settings['account_id'], live))
             row = cur.fetchone()
+            if row[5] != settings['account_id'] or row[6] != live:
+                raise PaymentError('Υπάρχει ήδη αίτημα με διαφορετικό Stripe account ή test/live περιβάλλον.')
             requests.append({'id': str(row[0]), 'payment_token': str(row[1]),
                              'provider_session_id': row[2], 'checkout_url': row[3],
                              'status': row[4], 'property_code': prop['code'],
