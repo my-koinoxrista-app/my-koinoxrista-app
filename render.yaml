@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: koinoxrista-payments
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements-webhook.txt
+    startCommand: gunicorn payment_webhook_server:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 60
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: KOINOXRISTA_WEBHOOK_DATABASE_URL
+        sync: false
+      - key: KOINOXRISTA_STRIPE_SECRET_KEY
+        sync: false
+      - key: KOINOXRISTA_STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: KOINOXRISTA_STRIPE_ACCOUNT_ID
+        sync: false
+      - key: KOINOXRISTA_STRIPE_COMPANY_ACCOUNTS
+        sync: false
+      - key: KOINOXRISTA_PAYMENT_PUBLIC_BASE_URL
+        sync: false
+      - key: KOINOXRISTA_STRIPE_MODE
+        value: direct

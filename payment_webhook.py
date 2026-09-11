@@ -6,7 +6,8 @@ import os
 import time
 from uuid import UUID
 
-from database import get_connection
+from psycopg.types.json import Jsonb
+from payment_webhook_database import get_payment_connection
 
 
 class WebhookError(ValueError):
@@ -15,8 +16,10 @@ class WebhookError(ValueError):
 
 def _signature(raw_body, header):
     secret = os.environ.get('KOINOXRISTA_STRIPE_WEBHOOK_SECRET', '').strip()
-    if not secret or not header:
-        raise WebhookError('Το webhook secret δεν έχει ρυθμιστεί.')
+    if not secret.startswith('whsec_'):
+        raise RuntimeError('Webhook secret is not configured.')
+    if not header:
+        raise WebhookError('Απουσιάζει η υπογραφή webhook.')
     values = {}
     for item in header.split(','):
         key, sep, value = item.partition('=')
@@ -41,17 +44,37 @@ def handle_stripe_webhook(raw_body, signature):
     _signature(raw_body, signature)
     try:
         event = json.loads(raw_body.decode('utf-8'))
-        event_id = str(event['id'])
-        event_type = str(event['type'])
-        account_id = str(event.get('account') or '')
+        if not isinstance(event, dict) or not isinstance(event.get('type'), str):
+            raise ValueError('Invalid event')
+        if event['type'] not in ('checkout.session.completed',
+                'checkout.session.async_payment_succeeded',
+                'checkout.session.async_payment_failed', 'charge.refunded'):
+            return 'IGNORED'
         obj = event['data']['object']
-        metadata = obj.get('metadata') or {}
-        token = UUID(str(metadata.get('payment_token') or obj.get('client_reference_id')))
+        if not isinstance(obj, dict) or not isinstance(obj.get('metadata', {}), dict):
+            raise ValueError('Invalid event object')
+        token = obj.get('metadata', {}).get('payment_token')
+        if token is None:
+            return 'IGNORED'
+        UUID(str(token))
+        if not isinstance(event.get('livemode'), bool):
+            raise ValueError('Missing mode')
+        mode = os.getenv('KOINOXRISTA_STRIPE_MODE', 'direct')
+        if mode == 'direct':
+            account_id = os.getenv('KOINOXRISTA_STRIPE_ACCOUNT_ID', '').strip()
+            if not account_id.startswith('acct_'):
+                raise RuntimeError('Stripe account is not configured.')
+            if event.get('account') and event['account'] != account_id:
+                raise ValueError('Unexpected connected account')
+        elif mode == 'connect':
+            account_id = event.get('account', '')
+            if not isinstance(account_id, str) or not account_id.startswith('acct_'):
+                raise ValueError('Missing connected account')
+        else:
+            raise RuntimeError('Invalid Stripe mode.')
     except (KeyError, TypeError, ValueError, UnicodeDecodeError):
-        raise WebhookError('Το webhook δεν περιέχει payment token.') from None
-    provider_payment_id = str(obj.get('payment_intent') or obj.get('id') or '')
-    failure = str((obj.get('last_payment_error') or {}).get('message') or '')
-    with get_connection() as conn, conn.cursor() as cur:
-        cur.execute('SELECT public.koinoxrista_payment_webhook(%s,%s,%s,%s,%s,%s,%s)',
-                ('stripe', event_id, str(token), event_type, provider_payment_id, account_id, failure))
+        raise WebhookError('Μη έγκυρο webhook πληρωμής.') from None
+    with get_payment_connection() as conn, conn.cursor() as cur:
+        cur.execute('SELECT public.koinoxrista_payment_webhook(%s,%s)',
+                    (Jsonb(event), account_id))
         return cur.fetchone()[0]
