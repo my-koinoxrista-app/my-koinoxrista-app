@@ -94,8 +94,8 @@ def _scoped_connection(require_company):
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            cur.execute('SELECT set_config(%s,%s,true)', ('app.context', payload))
-            cur.execute('SELECT set_config(%s,%s,true)', ('app.signature', signature))
+            cur.execute('SELECT set_config(%s,%s,true), set_config(%s,%s,true)',
+                        ('app.context', payload, 'app.signature', signature))
             if scope[2] is not None:
                 cur.execute('SELECT public.koinoxrista_can_access(%s::uuid)', (scope[2],))
                 if cur.fetchone()[0] is not True:

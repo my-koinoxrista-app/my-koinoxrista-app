@@ -144,7 +144,11 @@ def _manage_buildings_page():
 
 def _home_summary_rows(available, period_key, load_period=None):
     """Read the current company's draft amounts, without allocating or issuing."""
-    loader = load_period or store.load_period_data
+    if load_period is None:
+        periods = store.load_periods_data([item["id"] for item in available], period_key)
+        loader = lambda building_id, key: periods.get(building_id, {"expenses": []})
+    else:
+        loader = load_period
     rows = []
     total = Decimal('0')
     for item in available:

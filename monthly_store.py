@@ -20,6 +20,17 @@ def load_period_data(building_id, key):
     return row[0] if row else {'expenses': []}
 
 
+def load_periods_data(building_ids, key):
+    """Load a company's visible monthly drafts in one database round trip."""
+    ids = list(building_ids)
+    if not ids:
+        return {}
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute('SELECT building_id,data FROM monthly_periods WHERE building_id=ANY(%s) AND period_key=%s',
+                    (ids, key))
+        return dict(cur.fetchall())
+
+
 def save_period_data(building_id, key, data):
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute('''INSERT INTO monthly_periods (building_id, period_key, data)
