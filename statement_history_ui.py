@@ -9,7 +9,6 @@ from statement_store import (
     list_statements,
     get_statement,
     ensure_property_pdfs,
-    get_property_pdf,
     StatementError,
 )
 
@@ -96,6 +95,7 @@ def render(building_id):
             documents = ensure_property_pdfs(
                 building_id,
                 statement['id'],
+                include_content=True,
             )
 
             st.dataframe(
@@ -130,15 +130,9 @@ def render(building_id):
                 with st.expander(
                     f"{p['code']} · {float(p['total']):,.2f} €"
                 ):
-                    property_pdf = get_property_pdf(
-                        building_id,
-                        statement['id'],
-                        d['apartment_id'],
-                    )
-
                     st.download_button(
                         'Λήψη ατομικού PDF',
-                        property_pdf['pdf'],
+                        d['pdf'],
                         file_name=(
                             f"koinoxrista_{statement['period_key']}_"
                             f"v{statement['revision']}_{p['code']}.pdf"

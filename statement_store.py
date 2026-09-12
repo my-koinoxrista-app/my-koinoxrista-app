@@ -254,7 +254,7 @@ def get_statement(building_id, statement_id):
             'issued_at':issued_at,'report':report,'pdf':pdf_data}
 
 
-def ensure_property_pdfs(building_id, statement_id):
+def ensure_property_pdfs(building_id, statement_id, *, include_content=False):
     """Archive individual PDFs for a legacy issue, without changing its master."""
     company = current_tenant()
     with get_connection() as conn, conn.cursor() as cur:
@@ -271,9 +271,30 @@ def ensure_property_pdfs(building_id, statement_id):
         configuration,period_data,owners,report,issued_at,revision,master,digest = row
         if hashlib.sha256(bytes(master)).hexdigest()!=digest:
             raise StatementError('Το αρχικό PDF δεν συμφωνεί με το αποτύπωμά του.')
-        _archive_documents(cur,company,building_id,statement_id,configuration,period_data,
-                           owners,report,issued_at,revision)
-    return list_property_pdfs(building_id,statement_id)
+        cur.execute('''SELECT id,apartment_id,property_data,pdf_data,pdf_sha256
+                       FROM issued_property_pdfs WHERE company_id=%s AND building_id=%s AND statement_id=%s
+                       ORDER BY property_data->>'code',apartment_id''',(company,building_id,statement_id))
+        rows = cur.fetchall()
+        expected = {item['id']: item for item in report['apartments']}
+        existing = {item[1] for item in rows}
+        if existing - set(expected):
+            raise StatementError('Το αρχείο PDF περιέχει άγνωστη ιδιοκτησία.')
+        for _, aid, data, content, sha in rows:
+            if (hashlib.sha256(bytes(content)).hexdigest() != sha
+                    or not bytes(content).startswith(b'%PDF-')
+                    or _canonical(data) != _canonical(expected[aid])):
+                raise StatementError('Το ατομικό αρχείο δεν συμφωνεί με το snapshot.')
+        if existing != set(expected):
+            _archive_documents(cur,company,building_id,statement_id,configuration,period_data,
+                               owners,report,issued_at,revision)
+            cur.execute('''SELECT id,apartment_id,property_data,pdf_data,pdf_sha256
+                           FROM issued_property_pdfs WHERE company_id=%s AND building_id=%s AND statement_id=%s
+                           ORDER BY property_data->>'code',apartment_id''',(company,building_id,statement_id))
+            rows = cur.fetchall()
+    return [dict(id=str(id), apartment_id=aid, property=data, sha256=sha,
+                 **({'pdf': bytes(content)} if include_content else {}))
+            for id, aid, data, content, sha in rows]
+
 
 
 def list_property_pdfs(building_id, statement_id):
