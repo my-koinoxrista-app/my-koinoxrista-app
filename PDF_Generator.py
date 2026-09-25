@@ -87,4 +87,5 @@ def create_pdf(period, reuma_input, nero_input, episkeves_input=0.0, repair_name
     pdf.cell(col_widths[3], h, f"{total_b1:.2f}", 1, 0, "R", True)
     pdf.cell(col_widths[4], h, f"{total_b2:.2f}", 1, 1, "R", True)
 
-    return pdf.output(dest='S').encode('latin1')
+    # Διορθωμένο return για fpdf2
+    return bytes(pdf.output())
